@@ -1,0 +1,589 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>PonyBot 손가락 집게 제어 - Tasks Vision판</title>
+<style>
+  :root{
+    --bg:#0e1726; --card:#16213a; --line:#27375c;
+    --txt:#e8eefc; --muted:#8da3cc; --accent:#34d399; --warn:#f87171; --hi:#fbbf24;
+  }
+  *{box-sizing:border-box;margin:0;padding:0;font-family:'Segoe UI',-apple-system,BlinkMacSystemFont,sans-serif;}
+  body{background:var(--bg);color:var(--txt);padding:14px;max-width:920px;margin:0 auto;}
+  h1{font-size:20px;margin-bottom:4px;}
+  .sub{color:var(--muted);font-size:13px;margin-bottom:14px;line-height:1.45;}
+  .row{display:flex;gap:14px;flex-wrap:wrap;}
+  .col{flex:1;min-width:300px;}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:14px;margin-bottom:14px;}
+  .videowrap{position:relative;border-radius:12px;overflow:hidden;background:#000;aspect-ratio:4/3;}
+  video,canvas{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;}
+  video{transform:scaleX(-1);visibility:visible;background:#000;}
+  canvas{transform:scaleX(-1);pointer-events:none;}
+  button{background:var(--accent);color:#06281c;border:none;border-radius:10px;
+    padding:11px 14px;font-size:14px;font-weight:800;cursor:pointer;}
+  button.sec{background:#22325a;color:var(--txt);}
+  button.warn{background:#fbbf24;color:#2b1a00;}
+  button:disabled{opacity:.45;cursor:not-allowed;}
+  .btns{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px;}
+  .pill{display:inline-block;padding:3px 10px;border-radius:999px;font-size:12px;font-weight:800;}
+  .ok{background:#0f3d2e;color:var(--accent);}
+  .no{background:#3d1414;color:var(--warn);}
+  .mid{background:#3d3214;color:var(--hi);}
+  .gauge{height:26px;background:#0c1426;border:1px solid var(--line);border-radius:999px;overflow:hidden;}
+  .gauge>div{height:100%;width:50%;background:linear-gradient(90deg,#f87171,#fbbf24,#34d399);transition:width .08s linear;}
+  .big{font-size:46px;font-weight:900;letter-spacing:-1px;}
+  .label{color:var(--muted);font-size:12px;text-transform:uppercase;letter-spacing:.5px;}
+  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:10px;}
+  code{background:#0c1426;padding:2px 6px;border-radius:6px;color:var(--hi);font-size:12px;}
+  .note{font-size:12px;color:var(--muted);line-height:1.65;}
+  input[type=range]{width:100%;}
+  .claw{font-size:54px;text-align:center;line-height:1;}
+  .debuglog{
+    margin-top:10px;
+    padding:10px 11px;
+    border-radius:10px;
+    background:#0c1426;
+    border:1px solid var(--line);
+    color:var(--muted);
+    font-size:12px;
+    line-height:1.55;
+    white-space:pre-wrap;
+    word-break:break-word;
+    min-height:58px;
+  }
+  .debuglog.err{color:var(--warn);border-color:#5b2020;background:#1a1015;}
+  .debuglog.ok{color:var(--accent);border-color:#14533e;background:#0b1f19;}
+  .debuglog.mid{color:var(--hi);border-color:#5c4312;background:#1e180b;}
+  .small{font-size:11px;color:var(--muted);margin-top:8px;line-height:1.55;}
+</style>
+</head>
+<body>
+  <h1>🤖 AI 손가락 집게 제어</h1>
+  <div class="sub">MediaPipe Tasks Vision 버전 · 기존 <code>@mediapipe/hands</code> abort 오류 회피용</div>
+
+  <div class="row">
+    <div class="col">
+      <div class="card">
+        <div class="videowrap">
+          <video id="video" autoplay muted playsinline webkit-playsinline></video>
+          <canvas id="canvas"></canvas>
+        </div>
+        <div class="btns">
+          <button id="btnCamOnly">📷 카메라만 테스트</button>
+          <button id="btnHand" class="warn">✋ 손 인식 시작</button>
+          <button id="btnBle" class="sec">🔵 블루투스 연결</button>
+        </div>
+        <div id="debugLog" class="debuglog">대기 중입니다. 1) 카메라만 테스트 → 2) 손 인식 시작 순서로 누르세요.</div>
+        <div class="small">
+          Android Chrome + GitHub Pages HTTPS 권장. 기존 hands.js 대신 Tasks Vision HandLandmarker를 사용합니다.
+        </div>
+      </div>
+    </div>
+
+    <div class="col">
+      <div class="card">
+        <div class="grid2">
+          <div>
+            <div class="label">블루투스</div>
+            <span id="bleState" class="pill no">미연결</span>
+          </div>
+          <div>
+            <div class="label">손 인식</div>
+            <span id="handState" class="pill no">대기</span>
+          </div>
+        </div>
+        <div style="margin-top:14px">
+          <div class="claw" id="claw">🖐️</div>
+          <div style="text-align:center;margin:6px 0 12px">
+            <span class="big" id="angleTxt">45</span><span class="label"> &nbsp;DEG</span>
+          </div>
+          <div class="gauge"><div id="gaugeFill"></div></div>
+          <div class="note" style="display:flex;justify-content:space-between;margin-top:4px">
+            <span>0° 닫힘</span><span>90° 열림</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="label" style="margin-bottom:8px">수동 테스트</div>
+        <input id="manual" type="range" min="0" max="90" value="45">
+        <div class="btns">
+          <button id="btnOpen" class="sec">집게 열기 (90)</button>
+          <button id="btnClose" class="sec">집게 닫기 (0)</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="card note">
+    <b>사용 순서</b><br>
+    1) <b>카메라만 테스트</b>: 영상이 보이면 카메라/권한 정상<br>
+    2) <b>손 인식 시작</b>: 노란 점/초록 선이 뜨면 정상<br>
+    3) <b>블루투스 연결</b>: ESP-KJK 선택 후 수동 테스트<br><br>
+    ⚠️ 회사/공공기관 Wi-Fi에서 모델 다운로드가 막히면 모바일 데이터로 테스트하세요.<br>
+    🔧 집게 방향이 반대면 코드 상단의 <code>INVERT</code>를 <code>true</code>로 바꾸세요.
+  </div>
+
+<script type="module">
+'use strict';
+
+// ===== 설정 =====
+const TASKS_VERSION = '0.10.14';
+const TASKS_IMPORTS = [
+  `https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@${TASKS_VERSION}`,
+  `https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@${TASKS_VERSION}/vision_bundle.mjs`,
+  `https://unpkg.com/@mediapipe/tasks-vision@${TASKS_VERSION}/vision_bundle.mjs`
+];
+const WASM_BASES = [
+  `https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@${TASKS_VERSION}/wasm`,
+  `https://unpkg.com/@mediapipe/tasks-vision@${TASKS_VERSION}/wasm`
+];
+const MODEL_URL = 'https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task';
+
+// ===== Nordic UART Service UUID =====
+const UART_SERVICE = '6e400001-b5a3-f393-e0a9-e50e24dcca9e';
+const UART_RX      = '6e400002-b5a3-f393-e0a9-e50e24dcca9e';
+
+// ===== 집게 매핑 =====
+const GRIP_MIN = 0, GRIP_MAX = 90;
+const INVERT = false;
+const RATIO_CLOSED = 0.15;
+const RATIO_OPEN = 0.95;
+const SMOOTH = 0.35;
+
+// ===== 손가락 뼈대 연결선 =====
+const HAND_CONNECTIONS_LOCAL = [
+  [0,1],[1,2],[2,3],[3,4],
+  [0,5],[5,6],[6,7],[7,8],
+  [5,9],[9,10],[10,11],[11,12],
+  [9,13],[13,14],[14,15],[15,16],
+  [13,17],[17,18],[18,19],[19,20],
+  [0,17]
+];
+
+// ===== 상태 =====
+let rxChar = null;
+let stream = null;
+let handLandmarker = null;
+let HandLandmarkerClass = null;
+let FilesetResolverClass = null;
+let smoothAngle = 45;
+let lastSent = -1;
+let lastSendTime = 0;
+let running = false;
+let rafId = null;
+let lastVideoTime = -1;
+let frameCount = 0;
+let lastLogMs = 0;
+
+const $ = (id)=>document.getElementById(id);
+const video = $('video');
+const canvas = $('canvas');
+const ctx = canvas.getContext('2d');
+
+function logStatus(msg, type=''){
+  const el = $('debugLog');
+  el.textContent = msg;
+  el.className = 'debuglog' + (type ? ' ' + type : '');
+}
+
+function setBleState(connected){
+  const el = $('bleState');
+  el.textContent = connected ? '연결됨' : '미연결';
+  el.className = 'pill ' + (connected ? 'ok' : 'no');
+}
+
+function setHandState(state){
+  const el = $('handState');
+  if(state === true){
+    el.textContent = '인식 중';
+    el.className = 'pill ok';
+  }else if(state === 'loading'){
+    el.textContent = '로딩';
+    el.className = 'pill mid';
+  }else if(state === 'camera'){
+    el.textContent = '카메라만';
+    el.className = 'pill mid';
+  }else{
+    el.textContent = '없음';
+    el.className = 'pill no';
+  }
+}
+
+function updateGauge(angle){
+  $('angleTxt').textContent = Math.round(angle);
+  $('gaugeFill').style.width = (angle/GRIP_MAX*100) + '%';
+  $('claw').textContent = angle > 55 ? '🖐️' : (angle < 25 ? '🤏' : '✋');
+}
+
+function resizeCanvas(){
+  const w = video.videoWidth || 640;
+  const h = video.videoHeight || 480;
+  if(canvas.width !== w || canvas.height !== h){
+    canvas.width = w;
+    canvas.height = h;
+  }
+}
+
+function drawDot(x, y, r, color){
+  ctx.beginPath();
+  ctx.arc(x, y, r, 0, Math.PI * 2);
+  ctx.fillStyle = color;
+  ctx.fill();
+}
+
+function drawLandmarks(landmarks){
+  resizeCanvas();
+  ctx.clearRect(0,0,canvas.width,canvas.height);
+
+  ctx.lineWidth = 3;
+  ctx.strokeStyle = '#34d399';
+  for(const [a,b] of HAND_CONNECTIONS_LOCAL){
+    const pa = landmarks[a], pb = landmarks[b];
+    ctx.beginPath();
+    ctx.moveTo(pa.x * canvas.width, pa.y * canvas.height);
+    ctx.lineTo(pb.x * canvas.width, pb.y * canvas.height);
+    ctx.stroke();
+  }
+
+  for(let i=0;i<landmarks.length;i++){
+    const p = landmarks[i];
+    drawDot(p.x * canvas.width, p.y * canvas.height, i === 4 || i === 8 ? 7 : 4, i === 4 || i === 8 ? '#ffffff' : '#fbbf24');
+  }
+
+  // 엄지-검지 강조선
+  const t = landmarks[4], f = landmarks[8];
+  ctx.lineWidth = 4;
+  ctx.strokeStyle = '#ffffff';
+  ctx.beginPath();
+  ctx.moveTo(t.x * canvas.width, t.y * canvas.height);
+  ctx.lineTo(f.x * canvas.width, f.y * canvas.height);
+  ctx.stroke();
+}
+
+function clearOverlay(){
+  resizeCanvas();
+  ctx.clearRect(0,0,canvas.width,canvas.height);
+}
+
+function dist(a,b){
+  const dx=a.x-b.x, dy=a.y-b.y, dz=(a.z||0)-(b.z||0);
+  return Math.hypot(dx,dy,dz);
+}
+
+function pinchToAngle(lm){
+  const handSize = dist(lm[0], lm[9]) || 0.0001;
+  const ratio = dist(lm[4], lm[8]) / handSize;
+  let t = (ratio - RATIO_CLOSED) / (RATIO_OPEN - RATIO_CLOSED);
+  t = Math.max(0, Math.min(1, t));
+  let angle = GRIP_MIN + t * (GRIP_MAX - GRIP_MIN);
+  if(INVERT) angle = GRIP_MAX - (angle - GRIP_MIN);
+  return angle;
+}
+
+// ---------- 카메라 ----------
+async function startCameraOnly(){
+  try{
+    if(!window.isSecureContext && location.hostname !== 'localhost' && location.protocol !== 'file:'){
+      throw new Error('HTTPS/GitHub Pages 또는 localhost에서 열어야 합니다.');
+    }
+    if(!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia){
+      throw new Error('카메라 API를 사용할 수 없습니다. Android Chrome인지 확인하세요.');
+    }
+
+    if(stream){
+      stream.getTracks().forEach(t=>t.stop());
+      stream = null;
+    }
+
+    logStatus('카메라 권한 요청 중입니다. 권한 팝업에서 허용을 누르세요.', 'mid');
+
+    stream = await navigator.mediaDevices.getUserMedia({
+      audio: false,
+      video: {
+        facingMode: 'user',
+        width: { ideal: 640 },
+        height: { ideal: 480 }
+      }
+    });
+
+    video.srcObject = stream;
+    video.muted = true;
+    video.playsInline = true;
+    video.setAttribute('playsinline', '');
+    video.setAttribute('webkit-playsinline', '');
+
+    await new Promise((resolve, reject)=>{
+      const timer = setTimeout(()=>reject(new Error('비디오 로딩 시간 초과')), 10000);
+      video.onloadedmetadata = ()=>{
+        clearTimeout(timer);
+        resolve();
+      };
+    });
+
+    await video.play();
+    resizeCanvas();
+    clearOverlay();
+
+    setHandState('camera');
+    logStatus('카메라 성공. 영상이 보이면 이제 “손 인식 시작”을 누르세요.', 'ok');
+  }catch(e){
+    console.error(e);
+    setHandState(false);
+    logStatus('카메라 실패: ' + e.message + '\nChrome 사이트 설정에서 카메라 권한을 허용했는지 확인하세요.', 'err');
+  }
+}
+
+// ---------- Tasks Vision 로딩 ----------
+async function importTasksVision(){
+  if(HandLandmarkerClass && FilesetResolverClass) return;
+
+  let lastErr = null;
+  for(const url of TASKS_IMPORTS){
+    try{
+      logStatus('Tasks Vision 모듈 로딩 중...\n' + url, 'mid');
+      const mod = await import(url);
+      if(!mod.HandLandmarker || !mod.FilesetResolver){
+        throw new Error('필요한 export가 없습니다.');
+      }
+      HandLandmarkerClass = mod.HandLandmarker;
+      FilesetResolverClass = mod.FilesetResolver;
+      logStatus('Tasks Vision 모듈 로딩 성공.', 'ok');
+      return;
+    }catch(e){
+      console.warn('import failed', url, e);
+      lastErr = e;
+    }
+  }
+  throw new Error('Tasks Vision 모듈 로딩 실패: ' + (lastErr ? lastErr.message : 'unknown'));
+}
+
+async function createHandLandmarker(){
+  await importTasksVision();
+
+  let lastErr = null;
+
+  for(const wasmBase of WASM_BASES){
+    for(const delegate of ['GPU', 'CPU']){
+      try{
+        logStatus('손 모델 초기화 중...\nWASM: ' + wasmBase + '\nDelegate: ' + delegate, 'mid');
+
+        const vision = await FilesetResolverClass.forVisionTasks(wasmBase);
+
+        const lm = await HandLandmarkerClass.createFromOptions(vision, {
+          baseOptions: {
+            modelAssetPath: MODEL_URL,
+            delegate
+          },
+          runningMode: 'VIDEO',
+          numHands: 1,
+          minHandDetectionConfidence: 0.5,
+          minHandPresenceConfidence: 0.5,
+          minTrackingConfidence: 0.5
+        });
+
+        handLandmarker = lm;
+        logStatus('손 모델 초기화 성공. 손바닥을 화면 중앙에 크게 보여주세요.', 'ok');
+        return;
+      }catch(e){
+        console.warn('hand model init failed', wasmBase, delegate, e);
+        lastErr = e;
+      }
+    }
+  }
+
+  throw new Error('손 모델 초기화 실패: ' + (lastErr ? lastErr.message : 'unknown'));
+}
+
+// ---------- 손 인식 루프 ----------
+function startPredictLoop(){
+  running = true;
+  lastVideoTime = -1;
+  frameCount = 0;
+  lastLogMs = 0;
+
+  if(rafId) cancelAnimationFrame(rafId);
+
+  const loop = ()=>{
+    if(!running) return;
+
+    try{
+      resizeCanvas();
+
+      if(video.readyState >= 2 && handLandmarker){
+        const now = performance.now();
+
+        // 같은 비디오 프레임 중복 처리 방지
+        if(video.currentTime !== lastVideoTime){
+          lastVideoTime = video.currentTime;
+
+          const result = handLandmarker.detectForVideo(video, now);
+          const landmarks = result && result.landmarks && result.landmarks[0];
+
+          if(landmarks){
+            drawLandmarks(landmarks);
+
+            const target = pinchToAngle(landmarks);
+            smoothAngle = smoothAngle + (target - smoothAngle) * SMOOTH;
+            updateGauge(smoothAngle);
+            sendAngle(smoothAngle);
+
+            frameCount++;
+            setHandState(true);
+
+            if(frameCount === 1 || now - lastLogMs > 1500){
+              logStatus('손 인식 중입니다.\n프레임: ' + frameCount + '\n각도: ' + Math.round(smoothAngle), 'ok');
+              lastLogMs = now;
+            }
+          }else{
+            clearOverlay();
+            setHandState(false);
+            if(now - lastLogMs > 1500){
+              logStatus('손 모델은 실행 중입니다. 손바닥을 화면 중앙에 크게 보여주세요.\n밝은 곳에서 손 전체가 보이게 해야 잘 잡힙니다.', 'mid');
+              lastLogMs = now;
+            }
+          }
+        }
+      }
+    }catch(e){
+      console.error(e);
+      setHandState(false);
+      logStatus('인식 루프 오류: ' + e.message, 'err');
+    }
+
+    rafId = requestAnimationFrame(loop);
+  };
+
+  loop();
+}
+
+async function startHand(){
+  try{
+    setHandState('loading');
+
+    if(!stream){
+      await startCameraOnly();
+    }
+
+    if(!stream){
+      throw new Error('카메라가 먼저 시작되어야 합니다.');
+    }
+
+    await createHandLandmarker();
+
+    startPredictLoop();
+
+    $('btnHand').textContent = '✋ 손 인식 작동 중';
+    $('btnHand').disabled = true;
+  }catch(e){
+    console.error(e);
+    setHandState(false);
+    logStatus(
+      '손 인식 시작 실패: ' + e.message +
+      '\n\n이번 버전은 기존 @mediapipe/hands가 아니라 Tasks Vision을 씁니다.\n그래도 실패하면 모바일 데이터로 다시 열어보세요. 회사/기관 Wi-Fi가 Google Storage 또는 CDN을 막는 경우가 많습니다.',
+      'err'
+    );
+  }
+}
+
+// ---------- BLE ----------
+async function connectBLE(){
+  if(!navigator.bluetooth){
+    logStatus('이 브라우저는 Web Bluetooth를 지원하지 않습니다. Android Chrome에서 열어야 합니다.', 'err');
+    return;
+  }
+
+  try{
+    logStatus('블루투스 장치 검색 중입니다. ESP-KJK를 선택하세요.', 'mid');
+
+    const device = await navigator.bluetooth.requestDevice({
+      filters:[{ namePrefix:'ESP-KJK' }],
+      optionalServices:[UART_SERVICE]
+    });
+
+    device.addEventListener('gattserverdisconnected', ()=>{
+      rxChar = null;
+      setBleState(false);
+      logStatus('BLE 연결이 끊겼습니다.', 'err');
+    });
+
+    const server = await device.gatt.connect();
+    const service = await server.getPrimaryService(UART_SERVICE);
+    rxChar = await service.getCharacteristic(UART_RX);
+
+    setBleState(true);
+    logStatus('BLE 연결 성공: ' + (device.name || 'ESP-KJK') + '\n수동 테스트 슬라이더로 먼저 집게가 움직이는지 확인하세요.', 'ok');
+  }catch(e){
+    console.warn(e);
+    setBleState(false);
+    logStatus('BLE 연결 실패: ' + e.message + '\nAndroid Chrome, 블루투스 ON, Nearby devices 권한, ESP-KJK 광고 상태를 확인하세요.', 'err');
+  }
+}
+
+async function sendAngle(angle){
+  if(!rxChar) return;
+
+  const a = Math.round(angle);
+  const now = performance.now();
+
+  if(a === lastSent || now - lastSendTime < 70) return;
+
+  try{
+    const msg = new TextEncoder().encode(String(a));
+    if(rxChar.writeValueWithoutResponse) await rxChar.writeValueWithoutResponse(msg);
+    else await rxChar.writeValue(msg);
+    lastSent = a;
+    lastSendTime = now;
+  }catch(e){
+    console.warn('sendAngle failed', e);
+  }
+}
+
+async function sendRaw(text){
+  if(!rxChar) return;
+  try{
+    await rxChar.writeValue(new TextEncoder().encode(text));
+    lastSent = -1;
+  }catch(e){
+    console.warn('sendRaw failed', e);
+  }
+}
+
+// ---------- 이벤트 ----------
+$('btnCamOnly').onclick = startCameraOnly;
+$('btnHand').onclick = startHand;
+$('btnBle').onclick = connectBLE;
+
+$('manual').oninput = (e)=>{
+  const a = +e.target.value;
+  updateGauge(a);
+  sendAngle(a);
+};
+
+$('btnOpen').onclick = ()=>{
+  $('manual').value = 90;
+  updateGauge(90);
+  sendRaw('OPEN');
+};
+
+$('btnClose').onclick = ()=>{
+  $('manual').value = 0;
+  updateGauge(0);
+  sendRaw('CLOSE');
+};
+
+updateGauge(45);
+
+logStatus([
+  '준비 완료.',
+  '1) 카메라만 테스트',
+  '2) 영상이 보이면 손 인식 시작',
+  '3) 노란 점/초록 선이 뜨면 BLE 연결',
+  '',
+  'secureContext=' + window.isSecureContext,
+  'protocol=' + location.protocol
+].join('\n'));
+</script>
+</body>
+</html>
