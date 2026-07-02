@@ -1,0 +1,818 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>포니봇 팔의 그림자 로봇 - Tasks CPU판</title>
+<style>
+  :root{
+    --navy:#1f3864; --blue:#2563eb; --teal:#0e9e92; --amber:#e08a1e;
+    --red:#c0463b; --purple:#6d45c0; --green:#2e7d46; --ink:#1f2937; --muted:#6b7280;
+    --B:#2563eb; --S:#e08a1e; --E:#6d45c0; --G:#2e7d46;
+    --bg:#f5f7fa; --card:#fff; --line:#e7ecf2; --soft:#eef3fe;
+  }
+  *{ box-sizing:border-box; }
+  body{
+    margin:0;
+    font-family:"맑은 고딕","Malgun Gothic",system-ui,-apple-system,BlinkMacSystemFont,sans-serif;
+    background:var(--bg);
+    color:var(--ink);
+    padding:16px;
+  }
+  .wrap{ max-width:680px; margin:0 auto; }
+  h1{ color:var(--navy); font-size:21px; margin:0 0 4px; }
+  .sub{ color:var(--muted); font-size:13px; margin:0 0 14px; line-height:1.5; }
+  .card{
+    background:var(--card);
+    border:1px solid var(--line);
+    border-radius:14px;
+    padding:14px;
+    margin-bottom:12px;
+  }
+  #status{
+    background:#eef3fe;
+    border:1px solid var(--blue);
+    color:var(--navy);
+    border-radius:10px;
+    padding:11px 13px;
+    font-weight:bold;
+    font-size:13px;
+    line-height:1.55;
+    white-space:pre-wrap;
+    word-break:break-word;
+    min-height:58px;
+  }
+  #status.ok{ background:#eefaf4; border-color:#2e7d46; color:#14532d; }
+  #status.warn{ background:#fff7e8; border-color:#e08a1e; color:#7c3f00; }
+  #status.err{ background:#fff0f0; border-color:#c0463b; color:#7f1d1d; }
+  .row{ display:flex; gap:10px; flex-wrap:wrap; margin-top:8px; align-items:center; }
+  button{
+    font-family:inherit;
+    font-size:14px;
+    font-weight:bold;
+    border:none;
+    border-radius:10px;
+    padding:11px 14px;
+    cursor:pointer;
+    color:#fff;
+  }
+  button:disabled{ opacity:.45; cursor:not-allowed; }
+  #btnConnect{ background:var(--blue); }
+  #btnCamOnly{ background:#0e9e92; }
+  #btnTrack{ background:var(--purple); }
+  #btnTrack.on{ background:var(--red); }
+  #btnRestart{ background:#c0463b; }
+  #btnHome{ background:#fff; color:var(--navy); border:1px solid #d8dee8; }
+  .view{
+    position:relative;
+    width:100%;
+    aspect-ratio:4/3;
+    background:#000;
+    border-radius:12px;
+    overflow:hidden;
+  }
+  video,canvas{
+    position:absolute;
+    inset:0;
+    width:100%;
+    height:100%;
+    object-fit:cover;
+  }
+  video{
+    transform:scaleX(-1);
+    visibility:visible;
+    background:#000;
+  }
+  canvas{
+    transform:scaleX(-1);
+    pointer-events:none;
+  }
+  .joint{ margin:8px 0; }
+  .joint .top{ display:flex; justify-content:space-between; font-size:13px; }
+  .gauge{ height:11px; background:#eef1f6; border-radius:6px; overflow:hidden; margin-top:3px; }
+  .gauge > i{ display:block; height:100%; width:50%; transition:width .08s; }
+  label.chk{ display:flex; align-items:center; gap:5px; font-size:12.5px; }
+  select{
+    padding:8px;
+    border:1px solid #d8dee8;
+    border-radius:8px;
+    font-family:inherit;
+    background:#fff;
+  }
+  .hint{ font-size:12.5px; color:var(--muted); line-height:1.65; }
+  code{ background:#eef1f6; padding:1px 6px; border-radius:5px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>🦾 포니봇 — 팔의 그림자 로봇</h1>
+  <p class="sub">내 어깨·팔꿈치 각도를 로봇팔 서보에 복사하고, 엄지·검지 손끝으로 집게를 여닫습니다. Tasks Vision CPU 강제판.</p>
+
+  <div class="card">
+    <div id="status">초기화 중...</div>
+    <div class="row">
+      <button id="btnConnect">① 포니봇 연결</button>
+      <span style="font-size:13px;color:#6b7280;">추적 팔</span>
+      <select id="side">
+        <option value="right">오른팔</option>
+        <option value="left">왼팔</option>
+      </select>
+    </div>
+    <div class="row">
+      <button id="btnCamOnly">📷 카메라만 테스트</button>
+      <button id="btnTrack">② 팔+손 추적 시작</button>
+      <button id="btnRestart">🔁 CPU 재시작</button>
+      <button id="btnHome">HOME</button>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="view">
+      <video id="video" autoplay muted playsinline webkit-playsinline></video>
+      <canvas id="canvas"></canvas>
+    </div>
+
+    <div class="joint">
+      <div class="top"><span style="color:var(--B)">🔄 베이스 B (좌우 스윙)</span><b id="vB">90</b></div>
+      <div class="gauge"><i id="gB" style="background:var(--B)"></i></div>
+    </div>
+    <div class="joint">
+      <div class="top"><span style="color:var(--S)">↕ 어깨 S (들기)</span><b id="vS">90</b></div>
+      <div class="gauge"><i id="gS" style="background:var(--S)"></i></div>
+    </div>
+    <div class="joint">
+      <div class="top"><span style="color:var(--E)">📐 팔꿈치 E (굽힘)</span><b id="vE">90</b></div>
+      <div class="gauge"><i id="gE" style="background:var(--E)"></i></div>
+    </div>
+    <div class="joint">
+      <div class="top"><span style="color:var(--G)">🤏 집게 G (핀치)</span><b id="vG">45</b></div>
+      <div class="gauge"><i id="gG" style="background:var(--G)"></i></div>
+    </div>
+
+    <div class="row" style="margin-top:8px">
+      <label class="chk"><input type="checkbox" id="iB"> B반전</label>
+      <label class="chk"><input type="checkbox" id="iS"> S반전</label>
+      <label class="chk"><input type="checkbox" id="iE"> E반전</label>
+      <label class="chk"><input type="checkbox" id="iG"> G반전</label>
+    </div>
+  </div>
+
+  <p class="hint">
+    ※ <b>Android Chrome</b> + <b>HTTPS</b>(GitHub Pages 등) 권장. 카메라·블루투스 권한 허용.<br>
+    ※ BLE 검색 이름은 <code>ESP-KJK</code>로 고정했습니다.<br>
+    ※ 상반신이 화면에 다 보이게 서고, 선택한 팔과 손이 카메라에 같이 보이게 하세요.<br>
+    ※ 로그의 <code>pose감지</code>, <code>hand감지</code>가 증가하면 모델이 정상 동작 중입니다.
+  </p>
+</div>
+
+<script type="module">
+'use strict';
+
+// ===== MediaPipe Tasks Vision =====
+const TASKS_VERSION = '0.10.14';
+const TASKS_IMPORTS = [
+  `https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@${TASKS_VERSION}/vision_bundle.mjs`,
+  `https://unpkg.com/@mediapipe/tasks-vision@${TASKS_VERSION}/vision_bundle.mjs`
+];
+const WASM_BASES = [
+  `https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@${TASKS_VERSION}/wasm`,
+  `https://unpkg.com/@mediapipe/tasks-vision@${TASKS_VERSION}/wasm`
+];
+
+const POSE_MODEL_URLS = [
+  'https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/1/pose_landmarker_lite.task',
+  'https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float32/1/pose_landmarker_lite.task'
+];
+
+const HAND_MODEL_URLS = [
+  'https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task',
+  'https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/full/1/hand_landmarker.task'
+];
+
+// ===== Nordic UART =====
+const NUS_SERVICE = '6e400001-b5a3-f393-e0a9-e50e24dcca9e';
+const NUS_RX      = '6e400002-b5a3-f393-e0a9-e50e24dcca9e';
+
+// ===== servo 범위 =====
+const R = {
+  B:{min:20,max:160},
+  S:{min:20,max:160},
+  E:{min:20,max:160},
+  G:{min:0,max:90}
+};
+const SMOOTH = 0.30;
+const INFER_INTERVAL_MS = 100;
+
+// ===== landmark connections =====
+const POSE_CONNECTIONS_LOCAL = [
+  [11,12],
+  [11,13],[13,15],
+  [12,14],[14,16],
+  [11,23],[12,24],[23,24]
+];
+const HAND_CONNECTIONS_LOCAL = [
+  [0,1],[1,2],[2,3],[3,4],
+  [0,5],[5,6],[6,7],[7,8],
+  [5,9],[9,10],[10,11],[11,12],
+  [9,13],[13,14],[14,15],[15,16],
+  [13,17],[17,18],[18,19],[19,20],
+  [0,17]
+];
+
+// ===== state =====
+let rxChar = null;
+let stream = null;
+let poseLandmarker = null;
+let handLandmarker = null;
+let PoseLandmarkerClass = null;
+let HandLandmarkerClass = null;
+let FilesetResolverClass = null;
+
+let running = false;
+let rafId = null;
+let lastInferMs = 0;
+let inferCount = 0;
+let poseDetectCount = 0;
+let handDetectCount = 0;
+let lastLogMs = 0;
+
+let cur = {B:90,S:90,E:90,G:45};
+let lastStr = '';
+let lastSend = 0;
+let activePoseModel = '';
+let activeHandModel = '';
+
+const $ = id => document.getElementById(id);
+const video = $('video');
+const canvas = $('canvas');
+const ctx = canvas.getContext('2d', {alpha:true});
+
+const inv = {
+  B:()=>$('iB').checked,
+  S:()=>$('iS').checked,
+  E:()=>$('iE').checked,
+  G:()=>$('iG').checked
+};
+const side = ()=>$('side').value;
+
+function setStatus(m, type=''){
+  const el = $('status');
+  el.textContent = m;
+  el.className = type;
+}
+
+function gauge(id,v,r){
+  $('v'+id).textContent = Math.round(v);
+  $('g'+id).style.width = ((v-r.min)/(r.max-r.min)*100) + '%';
+}
+function paint(){
+  gauge('B',cur.B,R.B);
+  gauge('S',cur.S,R.S);
+  gauge('E',cur.E,R.E);
+  gauge('G',cur.G,R.G);
+}
+
+function resizeCanvas(){
+  const w = video.videoWidth || 640;
+  const h = video.videoHeight || 480;
+  if(canvas.width !== w || canvas.height !== h){
+    canvas.width = w;
+    canvas.height = h;
+  }
+}
+function clearOverlay(){
+  resizeCanvas();
+  ctx.clearRect(0,0,canvas.width,canvas.height);
+}
+function drawDot(x,y,r,color){
+  ctx.beginPath();
+  ctx.arc(x,y,r,0,Math.PI*2);
+  ctx.fillStyle = color;
+  ctx.fill();
+}
+function drawLine(a,b,color,width=3){
+  ctx.strokeStyle = color;
+  ctx.lineWidth = width;
+  ctx.beginPath();
+  ctx.moveTo(a.x*canvas.width, a.y*canvas.height);
+  ctx.lineTo(b.x*canvas.width, b.y*canvas.height);
+  ctx.stroke();
+}
+
+function drawPose(pose, sd){
+  if(!pose) return;
+
+  ctx.lineWidth = Math.max(3, Math.round(canvas.width/180));
+  ctx.strokeStyle = '#8aa0c8';
+
+  for(const [a,b] of POSE_CONNECTIONS_LOCAL){
+    if(!pose[a] || !pose[b]) continue;
+    drawLine(pose[a], pose[b], '#8aa0c8', 3);
+  }
+
+  const [si,ei,wi] = sd === 'right' ? [12,14,16] : [11,13,15];
+
+  [11,12,13,14,15,16,23,24].forEach(i=>{
+    const p = pose[i];
+    if(!p) return;
+    const tracked = i === si || i === ei || i === wi;
+    drawDot(p.x*canvas.width, p.y*canvas.height, tracked?7:4, tracked?'#6d45c0':'#8aa0c8');
+  });
+}
+
+function drawHand(hand){
+  if(!hand) return;
+
+  for(const [a,b] of HAND_CONNECTIONS_LOCAL){
+    if(!hand[a] || !hand[b]) continue;
+    drawLine(hand[a], hand[b], '#2e7d46', 3);
+  }
+
+  for(let i=0;i<hand.length;i++){
+    const p = hand[i];
+    const special = i===4 || i===8 || i===0;
+    drawDot(p.x*canvas.width, p.y*canvas.height, special?7:4, special?'#ffffff':'#e08a1e');
+  }
+
+  if(hand[4] && hand[8]){
+    drawLine(hand[4], hand[8], '#ffffff', 4);
+  }
+}
+
+// ===== BLE =====
+$('btnConnect').onclick = async () => {
+  if(!navigator.bluetooth){
+    setStatus('Web Bluetooth 미지원입니다. Android Chrome에서 열어야 합니다.', 'err');
+    return;
+  }
+
+  try{
+    setStatus('블루투스 검색 중입니다. 목록에서 ESP-KJK를 선택하세요.', 'warn');
+
+    const dev = await navigator.bluetooth.requestDevice({
+      filters:[{ namePrefix:'ESP-KJK' }],
+      optionalServices:[NUS_SERVICE]
+    });
+
+    dev.addEventListener('gattserverdisconnected',()=>{
+      rxChar = null;
+      setStatus('⚠️ BLE 연결 끊김', 'err');
+    });
+
+    const srv = await (await dev.gatt.connect()).getPrimaryService(NUS_SERVICE);
+    rxChar = await srv.getCharacteristic(NUS_RX);
+
+    setStatus('✅ 포니봇 연결됨: ' + (dev.name || 'ESP-KJK') + '\n이제 카메라만 테스트 → 팔+손 추적 시작을 누르세요.', 'ok');
+  }catch(e){
+    console.warn(e);
+    setStatus('연결 실패: ' + e.message + '\nESP-KJK가 광고 중인지, Nearby devices 권한이 허용됐는지 확인하세요.', 'err');
+  }
+};
+
+async function sendRaw(t){
+  if(!rxChar) return;
+  try{
+    const d = new TextEncoder().encode(t);
+    if(rxChar.writeValueWithoutResponse) await rxChar.writeValueWithoutResponse(d);
+    else await rxChar.writeValue(d);
+  }catch(e){
+    console.warn('BLE send failed', e);
+  }
+}
+
+function pushArm(){
+  const s = 'B:'+Math.round(cur.B)+',S:'+Math.round(cur.S)+',E:'+Math.round(cur.E)+',G:'+Math.round(cur.G);
+  const now = performance.now();
+  if(s !== lastStr && now - lastSend > 80){
+    sendRaw(s);
+    lastStr = s;
+    lastSend = now;
+  }
+}
+
+$('btnHome').onclick = () => {
+  cur = {B:90,S:90,E:90,G:45};
+  paint();
+  sendRaw('HOME');
+  lastStr = '';
+  setStatus('HOME 전송: B=90, S=90, E=90, G=45', 'ok');
+};
+
+// ===== math =====
+function dist(a,b){
+  return Math.hypot(a.x-b.x,a.y-b.y,(a.z||0)-(b.z||0));
+}
+function angleAt(a,b,c){
+  const v1x=a.x-b.x, v1y=a.y-b.y;
+  const v2x=c.x-b.x, v2y=c.y-b.y;
+  const d = v1x*v2x + v1y*v2y;
+  const m = (Math.hypot(v1x,v1y) * Math.hypot(v2x,v2y)) || 1e-6;
+  return Math.acos(Math.max(-1, Math.min(1, d/m))) * 180 / Math.PI;
+}
+function raiseFromDown(a,b){
+  const vx = b.x-a.x;
+  const vy = b.y-a.y;
+  const m = Math.hypot(vx,vy) || 1e-6;
+  return Math.acos(Math.max(-1, Math.min(1, vy/m))) * 180 / Math.PI;
+}
+function mapClamp(x,inLo,inHi,r,invert){
+  let t = (x-inLo)/(inHi-inLo);
+  t = Math.max(0, Math.min(1, t));
+  if(invert) t = 1-t;
+  return r.min + t*(r.max-r.min);
+}
+function ema(k,target){
+  cur[k] += (target-cur[k]) * SMOOTH;
+}
+
+// ===== camera =====
+async function startCameraOnly(){
+  try{
+    if(!window.isSecureContext && location.hostname !== 'localhost' && location.protocol !== 'file:'){
+      throw new Error('HTTPS/GitHub Pages 또는 localhost에서 열어야 합니다.');
+    }
+    if(!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia){
+      throw new Error('카메라 API를 사용할 수 없습니다. Android Chrome인지 확인하세요.');
+    }
+
+    if(stream){
+      stream.getTracks().forEach(t=>t.stop());
+      stream = null;
+    }
+
+    setStatus('카메라 권한 요청 중입니다. 권한 팝업에서 허용을 누르세요.', 'warn');
+
+    stream = await navigator.mediaDevices.getUserMedia({
+      audio:false,
+      video:{
+        facingMode:'user',
+        width:{ideal:640},
+        height:{ideal:480},
+        frameRate:{ideal:24,max:30}
+      }
+    });
+
+    video.srcObject = stream;
+    video.muted = true;
+    video.playsInline = true;
+    video.setAttribute('playsinline','');
+    video.setAttribute('webkit-playsinline','');
+
+    await new Promise((resolve,reject)=>{
+      const timer = setTimeout(()=>reject(new Error('비디오 로딩 시간 초과')),10000);
+      video.onloadedmetadata = () => {
+        clearTimeout(timer);
+        resolve();
+      };
+    });
+
+    await video.play();
+
+    for(let i=0;i<20 && (!video.videoWidth || !video.videoHeight);i++){
+      await new Promise(r=>setTimeout(r,100));
+    }
+
+    resizeCanvas();
+    clearOverlay();
+
+    setStatus(
+      '카메라 성공.\n' +
+      'videoWidth=' + video.videoWidth + ', videoHeight=' + video.videoHeight + '\n' +
+      '이제 팔+손 추적 시작을 누르세요.',
+      'ok'
+    );
+  }catch(e){
+    console.error(e);
+    setStatus('카메라 실패: ' + e.message + '\nChrome 사이트 설정에서 카메라 권한을 허용했는지 확인하세요.', 'err');
+  }
+}
+
+// ===== Tasks Vision loading =====
+async function importTasksVision(){
+  if(PoseLandmarkerClass && HandLandmarkerClass && FilesetResolverClass) return;
+
+  let lastErr = null;
+  for(const url of TASKS_IMPORTS){
+    try{
+      setStatus('Tasks Vision 모듈 로딩 중...\n' + url, 'warn');
+      const mod = await import(url);
+
+      if(!mod.PoseLandmarker || !mod.HandLandmarker || !mod.FilesetResolver){
+        throw new Error('필요한 export가 없습니다.');
+      }
+
+      PoseLandmarkerClass = mod.PoseLandmarker;
+      HandLandmarkerClass = mod.HandLandmarker;
+      FilesetResolverClass = mod.FilesetResolver;
+
+      setStatus('Tasks Vision 모듈 로딩 성공.', 'ok');
+      return;
+    }catch(e){
+      console.warn('import failed', url, e);
+      lastErr = e;
+    }
+  }
+
+  throw new Error('Tasks Vision 모듈 로딩 실패: ' + (lastErr ? lastErr.message : 'unknown'));
+}
+
+async function createLandmarkers(){
+  await importTasksVision();
+
+  if(poseLandmarker && poseLandmarker.close){
+    try{ poseLandmarker.close(); }catch(e){}
+  }
+  if(handLandmarker && handLandmarker.close){
+    try{ handLandmarker.close(); }catch(e){}
+  }
+  poseLandmarker = null;
+  handLandmarker = null;
+
+  let lastErr = null;
+
+  for(const wasmBase of WASM_BASES){
+    try{
+      const vision = await FilesetResolverClass.forVisionTasks(wasmBase);
+
+      let poseOk = false;
+      for(const poseModel of POSE_MODEL_URLS){
+        try{
+          setStatus(
+            'Pose 모델 초기화 중...\n' +
+            'Delegate: CPU 고정\n' +
+            'WASM: ' + wasmBase + '\n' +
+            'Model: ' + poseModel.split('/').slice(-4).join('/'),
+            'warn'
+          );
+
+          poseLandmarker = await PoseLandmarkerClass.createFromOptions(vision,{
+            baseOptions:{
+              modelAssetPath:poseModel,
+              delegate:'CPU'
+            },
+            runningMode:'VIDEO',
+            numPoses:1,
+            minPoseDetectionConfidence:0.25,
+            minPosePresenceConfidence:0.25,
+            minTrackingConfidence:0.25
+          });
+
+          activePoseModel = poseModel;
+          poseOk = true;
+          break;
+        }catch(e){
+          console.warn('pose init failed', poseModel, e);
+          lastErr = e;
+        }
+      }
+
+      if(!poseOk) continue;
+
+      let handOk = false;
+      for(const handModel of HAND_MODEL_URLS){
+        try{
+          setStatus(
+            'Hand 모델 초기화 중...\n' +
+            'Delegate: CPU 고정\n' +
+            'Model: ' + handModel.split('/').slice(-4).join('/'),
+            'warn'
+          );
+
+          handLandmarker = await HandLandmarkerClass.createFromOptions(vision,{
+            baseOptions:{
+              modelAssetPath:handModel,
+              delegate:'CPU'
+            },
+            runningMode:'VIDEO',
+            numHands:2,
+            minHandDetectionConfidence:0.25,
+            minHandPresenceConfidence:0.25,
+            minTrackingConfidence:0.25
+          });
+
+          activeHandModel = handModel;
+          handOk = true;
+          break;
+        }catch(e){
+          console.warn('hand init failed', handModel, e);
+          lastErr = e;
+        }
+      }
+
+      if(!handOk) continue;
+
+      setStatus('Pose + Hand 모델 초기화 성공. CPU로 실행합니다.\n상반신과 선택한 팔/손을 화면에 보여주세요.', 'ok');
+      return;
+    }catch(e){
+      console.warn('landmarker init failed', wasmBase, e);
+      lastErr = e;
+    }
+  }
+
+  throw new Error('Pose/Hand 모델 초기화 실패: ' + (lastErr ? lastErr.message : 'unknown'));
+}
+
+// Choose hand closest to the selected pose wrist.
+// This avoids left/right handedness confusion caused by mirrored selfie video.
+function chooseHand(handResult, pose, sd){
+  const hands = handResult && handResult.landmarks;
+  if(!hands || hands.length === 0) return null;
+
+  if(pose){
+    const wi = sd === 'right' ? 16 : 15;
+    const wrist = pose[wi];
+
+    if(wrist){
+      let best = null;
+      let bestD = Infinity;
+
+      for(const h of hands){
+        if(!h || !h[0]) continue;
+        const d = dist(h[0], wrist);
+        if(d < bestD){
+          bestD = d;
+          best = h;
+        }
+      }
+
+      if(best) return best;
+    }
+  }
+
+  return hands[0];
+}
+
+// ===== inference loop =====
+function startPredictLoop(){
+  running = true;
+  inferCount = 0;
+  poseDetectCount = 0;
+  handDetectCount = 0;
+  lastInferMs = 0;
+  lastLogMs = 0;
+
+  if(rafId) cancelAnimationFrame(rafId);
+
+  const loop = () => {
+    if(!running) return;
+
+    const now = performance.now();
+
+    try{
+      resizeCanvas();
+
+      if(video.readyState >= 2 && poseLandmarker && handLandmarker && now - lastInferMs >= INFER_INTERVAL_MS){
+        lastInferMs = now;
+        inferCount++;
+
+        const poseResult = poseLandmarker.detectForVideo(video, now);
+        const handResult = handLandmarker.detectForVideo(video, now);
+
+        const pose = poseResult && poseResult.landmarks && poseResult.landmarks[0];
+        const sd = side();
+        const hand = chooseHand(handResult, pose, sd);
+
+        clearOverlay();
+        drawPose(pose, sd);
+        drawHand(hand);
+
+        let ok = false;
+
+        if(pose){
+          const [si,ei,wi] = sd === 'right' ? [12,14,16] : [11,13,15];
+          const S = pose[si], E = pose[ei], W = pose[wi];
+
+          if(S && E && W){
+            poseDetectCount++;
+            ok = true;
+
+            // 어깨 들기: 위팔이 아래 방향과 이루는 각
+            ema('S', mapClamp(raiseFromDown(S,E), 0,175, R.S, inv.S()));
+
+            // 팔꿈치 굽힘: 어깨-팔꿈치-손목 내각
+            ema('E', mapClamp(angleAt(S,E,W), 40,175, R.E, inv.E()));
+
+            // 베이스 좌우 스윙: 위팔의 수평 성분
+            ema('B', mapClamp(E.x - S.x, -0.20,0.20, R.B, inv.B()));
+
+            // 팔꿈치 강조
+            drawDot(E.x*canvas.width, E.y*canvas.height, 9, '#6d45c0');
+          }
+        }
+
+        if(hand){
+          handDetectCount++;
+
+          const handSize = dist(hand[0], hand[9]) || 1e-4;
+          const ratio = dist(hand[4], hand[8]) / handSize;
+          ema('G', mapClamp(ratio, 0.15,0.95, R.G, inv.G()));
+        }
+
+        paint();
+        pushArm();
+
+        if(now - lastLogMs > 1200){
+          if(ok){
+            setStatus(
+              '🦾 팔 추적 중' + (hand ? ' + 집게' : '') + '\n' +
+              '추론횟수=' + inferCount + ', pose감지=' + poseDetectCount + ', hand감지=' + handDetectCount + '\n' +
+              'B=' + Math.round(cur.B) + ', S=' + Math.round(cur.S) + ', E=' + Math.round(cur.E) + ', G=' + Math.round(cur.G) + '\n' +
+              '선택=' + (sd === 'right' ? '오른팔' : '왼팔'),
+              'ok'
+            );
+          }else{
+            setStatus(
+              '팔이 안 보입니다. 상반신과 선택한 팔을 화면에 보이게 하세요.\n' +
+              '추론횟수=' + inferCount + ', pose감지=' + poseDetectCount + ', hand감지=' + handDetectCount + '\n' +
+              'video=' + video.videoWidth + 'x' + video.videoHeight,
+              'warn'
+            );
+          }
+          lastLogMs = now;
+        }
+      }
+    }catch(e){
+      console.error(e);
+      setStatus('추론 루프 오류: ' + e.message, 'err');
+    }
+
+    rafId = requestAnimationFrame(loop);
+  };
+
+  loop();
+}
+
+async function startTracking(){
+  try{
+    if(running){
+      stopTracking();
+      return;
+    }
+
+    if(!stream){
+      await startCameraOnly();
+    }
+    if(!stream){
+      throw new Error('카메라가 먼저 시작되어야 합니다.');
+    }
+
+    await createLandmarkers();
+    startPredictLoop();
+
+    $('btnTrack').classList.add('on');
+    $('btnTrack').textContent = '■ 추적 중지';
+    setStatus('📷 상반신을 보이고 선택한 팔을 움직여 보세요.', 'ok');
+  }catch(e){
+    console.error(e);
+    setStatus('추적 시작 실패: ' + e.message + '\n모바일 데이터/HTTPS/Android Chrome을 확인하세요.', 'err');
+  }
+}
+
+function stopTracking(){
+  running = false;
+  if(rafId) cancelAnimationFrame(rafId);
+  rafId = null;
+  clearOverlay();
+  $('btnTrack').classList.remove('on');
+  $('btnTrack').textContent = '② 팔+손 추적 시작';
+  setStatus('추적 중지됨.', 'warn');
+  if(rxChar) sendRaw('HOME');
+}
+
+async function restartCPU(){
+  try{
+    stopTracking();
+    if(poseLandmarker && poseLandmarker.close){
+      try{ poseLandmarker.close(); }catch(e){}
+    }
+    if(handLandmarker && handLandmarker.close){
+      try{ handLandmarker.close(); }catch(e){}
+    }
+    poseLandmarker = null;
+    handLandmarker = null;
+    await startTracking();
+  }catch(e){
+    console.error(e);
+    setStatus('CPU 재시작 실패: ' + e.message, 'err');
+  }
+}
+
+// ===== events =====
+$('btnCamOnly').onclick = startCameraOnly;
+$('btnTrack').onclick = startTracking;
+$('btnRestart').onclick = restartCPU;
+
+paint();
+
+setStatus([
+  '준비 완료!',
+  '1) 포니봇 연결: ESP-KJK 검색',
+  '2) 카메라만 테스트',
+  '3) 팔+손 추적 시작',
+  '',
+  'secureContext=' + window.isSecureContext,
+  'protocol=' + location.protocol
+].join('\n'));
+</script>
+</body>
+</html>
